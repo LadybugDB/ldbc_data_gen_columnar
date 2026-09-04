@@ -278,12 +278,15 @@ def generate_messages(cfg: DatagenConfig, d: Dictionaries, n: int,
     # Contiguous forum ranges; per-forum seeding => worker-invariant output.
     tasks = []
     if n_forums > 0:
+        # Spawn does not inherit globals: pass ctx explicitly (pickled).
+        # Fork inherits _MSG_CTX for free, so keep tasks tiny (ranges only).
+        import multiprocessing
+        need_ctx = multiprocessing.get_start_method() != "fork"
         span = (n_forums + max(workers, 1) - 1) // max(workers, 1)
         for w in range(max(workers, 1)):
             f0, f1 = w * span, min((w + 1) * span, n_forums)
             if f0 < f1:
-                # Pass ctx explicitly: spawn start method does not inherit globals.
-                tasks.append((w, f0, f1, _MSG_CTX))
+                tasks.append((w, f0, f1, _MSG_CTX) if need_ctx else (w, f0, f1))
     if workers <= 1:
         shards = [_messages_shard(t) for t in tasks]
     else:
