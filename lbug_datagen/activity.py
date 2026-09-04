@@ -108,12 +108,13 @@ _MSG_LIST_KEYS = ("post_ids", "post_img", "post_cd", "post_ip", "post_br",
 
 
 def _process_forum(f: int, members: list[int], ftags: list[int],
-                   out: dict[str, list], pid: int, cid: int) -> tuple[int, int]:
+                   out: dict[str, list], pid: int, cid: int,
+                   ctx: dict | None = None) -> tuple[int, int]:
     """Generate one forum's posts/comments/likes with shard-LOCAL ids.
 
     Per-forum seeding -> identical output for any worker count.
     """
-    ctx = _MSG_CTX
+    ctx = ctx if ctx is not None else _MSG_CTX
     rng = np.random.default_rng(np.random.SeedSequence([ctx["seed"] + 3, f]))
     creations = ctx["creations"]
     n = ctx["n"]
@@ -169,8 +170,12 @@ def _process_forum(f: int, members: list[int], ftags: list[int],
 
 def _messages_shard(task) -> tuple[int, dict[str, list], int, int]:
     """Process a contiguous forum range. Top-level (picklable)."""
-    shard_idx, f0, f1 = task
-    ctx = _MSG_CTX
+    if len(task) == 4:
+        shard_idx, f0, f1, task_ctx = task
+        ctx = task_ctx if task_ctx is not None else _MSG_CTX
+    else:
+        shard_idx, f0, f1 = task
+        ctx = _MSG_CTX
     members_of = ctx["members_of"]
     tags_of_forum = ctx["tags_of_forum"]
     out = {k: [] for k in _MSG_LIST_KEYS}
@@ -179,7 +184,7 @@ def _messages_shard(task) -> tuple[int, dict[str, list], int, int]:
         members = members_of.get(f)
         if not members:
             continue
-        pid, cid = _process_forum(f, members, tags_of_forum.get(f, [0]), out, pid, cid)
+        pid, cid = _process_forum(f, members, tags_of_forum.get(f, [0]), out, pid, cid, ctx)
     return shard_idx, out, pid, cid
 
 
@@ -277,7 +282,8 @@ def generate_messages(cfg: DatagenConfig, d: Dictionaries, n: int,
         for w in range(max(workers, 1)):
             f0, f1 = w * span, min((w + 1) * span, n_forums)
             if f0 < f1:
-                tasks.append((w, f0, f1))
+                # Pass ctx explicitly: spawn start method does not inherit globals.
+                tasks.append((w, f0, f1, _MSG_CTX))
     if workers <= 1:
         shards = [_messages_shard(t) for t in tasks]
     else:

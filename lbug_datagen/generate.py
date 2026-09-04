@@ -83,6 +83,7 @@ def write_lbdb(cfg: DatagenConfig, out: str, log=print) -> dict[str, int]:
     # Skip default PK hash indexes during bulk load (built/added later);
     # keeps ingestion to a pure bulk path without per-row index maintenance.
     conn.execute("CALL enable_default_hash_index = false;")
+    conn.execute("CALL debug_enable_multi_writes=true;")
     for stmt in [s.strip() for s in SCHEMA_DDL.split(";") if s.strip()]:
         conn.execute(stmt)
     counts = load_nodes(conn, tables, cfg.arrow_chunk, log)
