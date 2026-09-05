@@ -86,14 +86,16 @@ def write_lbdb(cfg: DatagenConfig, out: str, log=print) -> dict[str, int]:
     conn.execute("CALL debug_enable_multi_writes=true;")
     for stmt in [s.strip() for s in SCHEMA_DDL.split(";") if s.strip()]:
         conn.execute(stmt)
-    counts = load_nodes(conn, tables, cfg.arrow_chunk, log)
+    counts = load_nodes(conn, tables, cfg.arrow_chunk, log,
+                        db=db, workers=cfg.workers)
     # Explicit PK hash index for Person (default hash indexes are disabled
     # above for bulk load). Speeds up rel-endpoint probes below and all later
     # PK lookups. ART/secondary indexes are intentionally NOT created here.
     t0 = time.time()
     conn.execute("CREATE HASH INDEX person_pk_hx FOR (n:Person) ON (n.ID)")
     log(f"hash index person_pk_hx: {time.time()-t0:.2f}s")
-    counts.update(load_rels(conn, tables, cfg.arrow_chunk, log))
+    counts.update(load_rels(conn, tables, cfg.arrow_chunk, log,
+                            db=db, workers=cfg.workers))
     try:
         conn.close()
     except Exception:
@@ -110,7 +112,8 @@ def main(argv=None):
                     help="mean knows-degree override (0 = reference formula)")
     ap.add_argument("--seed", type=int, default=42)
     ap.add_argument("--workers", type=int, default=1,
-                    help="process-pool workers for knows/messages generation")
+                    help="worker threads for concurrent bulk-load writes and "
+                         "knows/messages generation")
     ap.add_argument("--secondary", action="store_true",
                     help="write secondary ART index cypher next to output")
     ap.add_argument("--arrow-chunk", type=int, default=200_000)
