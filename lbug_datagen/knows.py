@@ -99,10 +99,14 @@ def _knows_block_task(task) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
 
 def generate_knows(cfg: DatagenConfig, n: int, city_idx: list[int],
                    interests: pa.Table, creations: list[int],
-                   seed: int, log=print, workers: int = 1) -> pa.Table:
+                   seed: int, log=print, workers: int = 1,
+                   degree: np.ndarray | None = None,
+                   target_pairs: int | None = None) -> pa.Table:
     rng = np.random.default_rng(seed + 1)
-    degree = facebook_degree(rng, n, num_persons=cfg.num_persons or n,
-                             mean_override=cfg.degree_mean)
+    if degree is None:
+        degree = facebook_degree(rng, n, num_persons=cfg.num_persons or n,
+                                 mean_override=cfg.degree_mean)
+    degree = np.asarray(degree)
     degree = np.clip(degree, 0,
                      min(cfg.max_num_friends, max(n - 1, 1))).astype(np.int64)
 
@@ -162,8 +166,21 @@ def generate_knows(cfg: DatagenConfig, n: int, city_idx: list[int],
     keys = (src << np.int64(32)) | dst
     _, first_idx = np.unique(keys, return_index=True)  # FriendshipMerger analogue
     first_idx.sort()  # stable, deterministic order
+    src_f, dst_f = src[first_idx], dst[first_idx]
+    dates_f = dates[first_idx]
+    if target_pairs is not None and len(src_f) > target_pairs:
+        # the multi-pass generator overshoots; thin randomly to the official
+        # undirected pair count (preserves the degree distribution shape)
+        keep = np.random.default_rng(seed + 13).choice(
+            len(src_f), size=target_pairs, replace=False)
+        keep.sort()
+        src_f, dst_f, dates_f = src_f[keep], dst_f[keep], dates_f[keep]
+    # knows is an UNDIRECTED relationship in the LDBC SNB (the spark datagen
+    # and the LSQB loader both store every edge in both directions), so emit
+    # each deduped edge twice.
     return pa.table({
-        "FROM": pa.array(src[first_idx], type=pa.int64()),
-        "TO": pa.array(dst[first_idx], type=pa.int64()),
-        "creationDate": pa.array(dates[first_idx], type=pa.timestamp("ms")),
+        "FROM": pa.array(np.concatenate([src_f, dst_f]), type=pa.int64()),
+        "TO": pa.array(np.concatenate([dst_f, src_f]), type=pa.int64()),
+        "creationDate": pa.array(np.concatenate([dates_f, dates_f]),
+                                 type=pa.timestamp("ms")),
     })

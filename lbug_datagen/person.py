@@ -14,14 +14,14 @@ from __future__ import annotations
 import numpy as np
 import pyarrow as pa
 
+from lbug_datagen import official as off
 from lbug_datagen.dictionaries import Dictionaries
 from lbug_datagen.distributions import SimulationClock, power_law_int
 from lbug_datagen.params import DatagenConfig
 
 
-def generate_persons(cfg: DatagenConfig, d: Dictionaries,
-                     city_ids: dict[str, int], n_tags: int,
-                     seed: int) -> dict[str, pa.Table]:
+def generate_persons(cfg: DatagenConfig, d: Dictionaries, city_ids, n_tags: int,
+                     seed: int, o: "off.Official | None" = None) -> dict[str, pa.Table]:
     rng = np.random.default_rng(seed)
     n = cfg.num_persons
     clock = SimulationClock(cfg.start_year, cfg.num_years)
@@ -29,7 +29,6 @@ def generate_persons(cfg: DatagenConfig, d: Dictionaries,
     first = rng.integers(0, len(d.first_names), size=n)
     last = rng.integers(0, len(d.last_names), size=n)
     gender = np.where(rng.random(n) < 0.5, "male", "female")
-    city_idx = rng.integers(0, len(d.cities), size=n)
     creation = np.array([clock.random_person_creation(rng) for _ in range(n)],
                         dtype=np.int64)
     # birthday: age 18-70 at creation time
@@ -51,35 +50,63 @@ def generate_persons(cfg: DatagenConfig, d: Dictionaries,
     })
 
     # locatedIn: city place id
-    city_names = [d.cities[i][0] for i in city_idx]
+    if o is not None:
+        person_place = o.person_place_ids(n, rng)
+        # city_idx = position in the city-id array (knows geo-correlation pass)
+        order = np.argsort(o.city_ids)
+        city_idx = order[np.searchsorted(o.city_ids[order], person_place)]
+    else:
+        city_idx = rng.integers(0, len(d.cities), size=n)
+        city_names = [d.cities[i][0] for i in city_idx]
+        person_place = np.array([city_ids[c] for c in city_names], dtype=np.int64)
     located = pa.table({
         "FROM": list(range(n)),
-        "TO": [city_ids[c] for c in city_names],
+        "TO": person_place.tolist(),
     })
 
-    # studyAt: 0-1 universities (classYear ~ creation-2y); workAt: 0..max companies
+    # studyAt / workAt; interests: empirical count dist in official mode
     study_from, study_to, study_year = [], [], []
     work_from, work_to, work_since = [], [], []
-    n_orgs = 2 * len(d.cities)
-    for i in range(n):
-        if rng.random() < 0.7:
-            uni = int(rng.integers(0, len(d.cities))) * 2  # university slot
-            study_from.append(i); study_to.append(uni)
-            study_year.append(int(1970 + int(rng.integers(1990, 2012))))
-        for _ in range(int(rng.integers(0, cfg.max_companies + 1))):
-            comp = int(rng.integers(0, len(d.cities))) * 2 + 1
-            work_from.append(i); work_to.append(comp)
-            work_since.append(int(rng.integers(2005, 2013)))
+    if o is not None:
+        study_k = rng.binomial(2, o.scalars["study_per_person"] / 2, size=n)
+        work_k = 1 + rng.binomial(2, (o.scalars["work_per_person"] - 1) / 2, size=n)
+        for i in range(n):
+            for _ in range(int(study_k[i])):
+                study_from.append(i)
+                study_to.append(int(o.university_ids[rng.integers(0, len(o.university_ids))]))
+                study_year.append(int(1970 + int(rng.integers(1990, 2012))))
+            for _ in range(int(work_k[i])):
+                work_from.append(i)
+                work_to.append(int(o.company_ids[rng.integers(0, len(o.company_ids))]))
+                work_since.append(int(rng.integers(2005, 2013)))
+    else:
+        n_orgs = 2 * len(d.cities)
+        for i in range(n):
+            if rng.random() < 0.7:
+                uni = int(rng.integers(0, len(d.cities))) * 2  # university slot
+                study_from.append(i); study_to.append(uni)
+                study_year.append(int(1970 + int(rng.integers(1990, 2012))))
+            for _ in range(int(rng.integers(0, cfg.max_companies + 1))):
+                comp = int(rng.integers(0, len(d.cities))) * 2 + 1
+                work_from.append(i); work_to.append(comp)
+                work_since.append(int(rng.integers(2005, 2013)))
 
     # interests: power-law tag count, country-correlated tag choice
     int_from, int_to = [], []
-    for i in range(n):
-        k = int(power_law_int(rng, cfg.min_num_tags_per_person,
-                              cfg.max_num_tags_per_person + 1, size=1)[0])
-        base = (city_idx[i] * 3) % max(n_tags, 1)
-        for j in range(min(k, n_tags)):
-            int_from.append(i)
-            int_to.append((base + int(rng.integers(0, n_tags))) % n_tags)
+    if o is not None:
+        ks = np.minimum(o.hists["interests_per_person"].sample(rng, n), n_tags)
+        for i in range(n):
+            for t in rng.choice(n_tags, size=int(ks[i]), replace=False):
+                int_from.append(i)
+                int_to.append(int(t))
+    else:
+        for i in range(n):
+            k = int(power_law_int(rng, cfg.min_num_tags_per_person,
+                                  cfg.max_num_tags_per_person + 1, size=1)[0])
+            base = (city_idx[i] * 3) % max(n_tags, 1)
+            for j in range(min(k, n_tags)):
+                int_from.append(i)
+                int_to.append((base + int(rng.integers(0, n_tags))) % n_tags)
 
     # languages/emails as side tables for parity checks (not in .lbdb schema)
     return {
@@ -91,6 +118,7 @@ def generate_persons(cfg: DatagenConfig, d: Dictionaries,
                             "workFrom": pa.array(work_since, type=pa.int64())}),
         "hasInterest": pa.table({"FROM": int_from, "TO": int_to}),
         "_person_city": pa.table({"city": city_idx.tolist()}),
+        "_person_place": pa.table({"place": np.asarray(person_place).tolist()}),
         "_person_creation": pa.table({"creationDate": creation.tolist()}),
     }
 

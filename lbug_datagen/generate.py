@@ -13,9 +13,11 @@ import shutil
 import time
 from pathlib import Path
 
+import numpy as np
 import pyarrow as pa
 
 from lbug_datagen.activity import generate_forums, generate_messages
+from lbug_datagen import official as off
 from lbug_datagen.bulk import load_nodes, load_rels
 from lbug_datagen.dictionaries import Dictionaries
 from lbug_datagen.knows import generate_knows
@@ -28,34 +30,60 @@ from lbug_datagen.static_graph import generate_static
 def build_tables(cfg: DatagenConfig, log=print) -> dict[str, pa.Table]:
     t0 = time.time()
     d = Dictionaries()
+    o = off.get()
     static = generate_static(d)
-    city_ids: dict[str, int] = static.pop("_city_id")  # type: ignore
     n_tags: int = static.pop("_tag_count")["n"][0].as_py()  # type: ignore
+    city_ids = None
+    if "_official_city_ids" in static:
+        city_ids = static.pop("_official_city_ids")  # np array of place ids
+        static.pop("_official_city_probs", None)
+    else:
+        city_ids = static.pop("_city_id")  # type: ignore
     log(f"static: {time.time()-t0:.2f}s")
 
     t0 = time.time()
-    persons = generate_persons(cfg, d, city_ids, n_tags, cfg.seed)
+    persons = generate_persons(cfg, d, city_ids, n_tags, cfg.seed, o=o)
     city_idx = persons.pop("_person_city")["city"].to_pylist()
+    person_place = (persons.pop("_person_place")["place"].to_pylist()
+                    if o is not None else None)
     creations = persons.pop("_person_creation")["creationDate"].to_pylist()
     log(f"persons ({cfg.num_persons}): {time.time()-t0:.2f}s")
 
+    n_persons = cfg.num_persons
     t0 = time.time()
-    knows = generate_knows(cfg, cfg.num_persons, city_idx,
+    degree = None
+    if o is not None:
+        degree = np.clip(o.hists["knows_degree"].sample(
+            np.random.default_rng(cfg.seed + 9), cfg.num_persons),
+            0, cfg.num_persons - 1)
+    target_pairs = (int(o.scalars["knows_undirected"] * n_persons
+                        / o.scalars["n_persons"]) if o is not None else None)
+    knows = generate_knows(cfg, n_persons, city_idx,
                            persons["hasInterest"], creations, cfg.seed,
-                           log=log, workers=cfg.workers)
+                           log=log, workers=cfg.workers, degree=degree,
+                           target_pairs=target_pairs)
     log(f"knows ({knows.num_rows}): {time.time()-t0:.2f}s")
 
     t0 = time.time()
     forums = generate_forums(cfg, d, cfg.num_persons, city_idx, creations,
-                             persons["hasInterest"], cfg.seed)
+                             persons["hasInterest"], cfg.seed,
+                             o=o, n_tags=n_tags)
     n_forums: int = forums.pop("_forum_of")  # type: ignore
     forums.pop("_cont_placeholder", None)
     log(f"forums ({forums['Forum'].num_rows}): {time.time()-t0:.2f}s")
 
     t0 = time.time()
+    friends = None
+    if o is not None:
+        kf = knows["FROM"].to_pylist()
+        kt = knows["TO"].to_pylist()
+        friends = {}
+        for a, b in zip(kf, kt):
+            friends.setdefault(a, []).append(b)  # knows is bidirectional
     msgs = generate_messages(cfg, d, cfg.num_persons, n_forums, creations,
                              forums["hasMember"], forums["forumHasTag"], cfg.seed,
-                             workers=cfg.workers)
+                             workers=cfg.workers, off=o, n_tags=n_tags,
+                             person_place=person_place, friends=friends)
     log(f"messages (posts={msgs['Post'].num_rows}, comments={msgs['Comment'].num_rows}): "
         f"{time.time()-t0:.2f}s")
 
@@ -78,7 +106,8 @@ def write_lbdb(cfg: DatagenConfig, out: str, log=print) -> dict[str, int]:
         else:
             sib.unlink()
         log(f"removed stale artifact {sib}")
-    db = lb.Database(out)
+    db = lb.Database(out, auto_checkpoint=False,
+                     checkpoint_threshold=1 << 60)  # checkpoint once at the end
     conn = lb.Connection(db)
     # Skip default PK hash indexes during bulk load (built/added later);
     # keeps ingestion to a pure bulk path without per-row index maintenance.
@@ -96,6 +125,10 @@ def write_lbdb(cfg: DatagenConfig, out: str, log=print) -> dict[str, int]:
     log(f"hash index person_pk_hx: {time.time()-t0:.2f}s")
     counts.update(load_rels(conn, tables, cfg.arrow_chunk, log,
                             db=db, workers=cfg.workers))
+    try:
+        conn.execute("CHECKPOINT")
+    except Exception as e:
+        log(f"checkpoint: {e}")
     try:
         conn.close()
     except Exception:

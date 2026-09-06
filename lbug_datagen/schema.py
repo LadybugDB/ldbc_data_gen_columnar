@@ -7,9 +7,12 @@ from __future__ import annotations
 SCHEMA_DDL = """
 CREATE NODE TABLE Comment(ID INT64 PRIMARY KEY, creationDate TIMESTAMP, locationIP STRING, browserUsed STRING, content STRING, length INT64);
 CREATE NODE TABLE Forum(ID INT64 PRIMARY KEY, title STRING, creationDate TIMESTAMP);
-CREATE NODE TABLE Organisation(ID INT64 PRIMARY KEY, type STRING, name STRING, url STRING);
+CREATE NODE TABLE Company(ID INT64 PRIMARY KEY, name STRING, url STRING);
+CREATE NODE TABLE University(ID INT64 PRIMARY KEY, name STRING, url STRING);
 CREATE NODE TABLE Person(ID INT64 PRIMARY KEY, firstName STRING, lastName STRING, gender STRING, birthday DATE, creationDate TIMESTAMP, locationIP STRING, browserUsed STRING);
-CREATE NODE TABLE Place(ID INT64 PRIMARY KEY, name STRING, url STRING, type STRING);
+CREATE NODE TABLE Continent(ID INT64 PRIMARY KEY, name STRING, url STRING);
+CREATE NODE TABLE Country(ID INT64 PRIMARY KEY, name STRING, url STRING);
+CREATE NODE TABLE City(ID INT64 PRIMARY KEY, name STRING, url STRING);
 CREATE NODE TABLE Post(ID INT64 PRIMARY KEY, imageFile STRING, creationDate TIMESTAMP, locationIP STRING, browserUsed STRING, language STRING, content STRING, length INT64);
 CREATE NODE TABLE Tag(ID INT64 PRIMARY KEY, name STRING, url STRING);
 CREATE NODE TABLE Tagclass(ID INT64 PRIMARY KEY, name STRING, url STRING);
@@ -23,26 +26,28 @@ CREATE REL TABLE commentHasTag(FROM Comment TO Tag);
 CREATE REL TABLE forumHasTag(FROM Forum TO Tag);
 CREATE REL TABLE postHasTag(FROM Post TO Tag);
 CREATE REL TABLE hasType(FROM Tag TO Tagclass, MANY_ONE);
-CREATE REL TABLE commentIsLocatedIn(FROM Comment TO Place, MANY_ONE);
-CREATE REL TABLE organisationIsLocatedIn(FROM Organisation TO Place, MANY_ONE);
-CREATE REL TABLE personIsLocatedIn(FROM Person TO Place, MANY_ONE);
-CREATE REL TABLE postIsLocatedIn(FROM Post TO Place, MANY_ONE);
-CREATE REL TABLE isPartOf(FROM Place TO Place, MANY_ONE);
+CREATE REL TABLE commentIsLocatedIn(FROM Comment TO City, MANY_ONE);
+CREATE REL TABLE companyIsLocatedIn(FROM Company TO Country, MANY_ONE);
+CREATE REL TABLE universityIsLocatedIn(FROM University TO City, MANY_ONE);
+CREATE REL TABLE personIsLocatedIn(FROM Person TO City, MANY_ONE);
+CREATE REL TABLE postIsLocatedIn(FROM Post TO City, MANY_ONE);
+CREATE REL TABLE cityIsPartOfCountry(FROM City TO Country, MANY_ONE);
+CREATE REL TABLE countryIsPartOfContinent(FROM Country TO Continent, MANY_ONE);
 CREATE REL TABLE isSubclassOf(FROM Tagclass TO Tagclass, MANY_ONE);
 CREATE REL TABLE knows(FROM Person TO Person, creationDate TIMESTAMP);
 CREATE REL TABLE likeComment(FROM Person TO Comment, creationDate TIMESTAMP);
 CREATE REL TABLE likePost(FROM Person TO Post, creationDate TIMESTAMP);
 CREATE REL TABLE replyOfComment(FROM Comment TO Comment, MANY_ONE);
 CREATE REL TABLE replyOfPost(FROM Comment TO Post, MANY_ONE);
-CREATE REL TABLE studyAt(FROM Person TO Organisation, classYear INT64);
-CREATE REL TABLE workAt(FROM Person TO Organisation, workFrom INT64);
+CREATE REL TABLE studyAt(FROM Person TO University, classYear INT64);
+CREATE REL TABLE workAt(FROM Person TO Company, workFrom INT64);
 """.strip()
 
 # Secondary ART indexes (same set as ladybugdb/build_graph.py); created AFTER
 # bulk load so index build doesn't slow down ingestion. Emitted as a .cypher
 # script via --secondary (never created inline by the generator).
 SECONDARY_INDEXES: list[tuple[str, str]] = [
-    ("Place", "name"),
+    ("City", "name"),
     ("Tag", "name"),
     ("Person", "firstName"),
     ("Person", "lastName"),

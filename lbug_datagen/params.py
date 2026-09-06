@@ -9,14 +9,15 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-# numPersons per scale factor (from scale_factors.xml, SNB interactive mode).
+# numPersons per scale factor. "1" is the LSQB sf1 person count (11,000);
+# the other values are the SNB interactive scale_factors.xml numbers.
 # NOTE: the old values here (23800/50000/114000/280000/560000/1100000 for
 # SF>=3) were from the BI datagen; SNB numbers are the upstream ones below.
 SCALE_FACTOR_PERSONS: dict[str, int] = {
     "0.003": 50,
     "0.1": 1700,
     "0.3": 3900,
-    "1": 10620,
+    "1": 11000,
     "3": 25870,
     "10": 70800,
     "30": 175950,
