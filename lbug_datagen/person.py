@@ -95,10 +95,14 @@ def generate_persons(cfg: DatagenConfig, d: Dictionaries, city_ids, n_tags: int,
     int_from, int_to = [], []
     if o is not None:
         ks = np.minimum(o.hists["interests_per_person"].sample(rng, n), n_tags)
+        # main interest country-correlated so the knows interest-pass clusters
+        # edges within countries (official q3 triangle density)
+        ctry = o.city_country_idx(person_place)
+        main = (ctry * 145) % n_tags
         for i in range(n):
-            for t in rng.choice(n_tags, size=int(ks[i]), replace=False):
-                int_from.append(i)
-                int_to.append(int(t))
+            int_from.append(i); int_to.append(int(main[i]))
+            for t in rng.choice(n_tags, size=max(int(ks[i]) - 1, 0), replace=False):
+                int_from.append(i); int_to.append(int(t))
     else:
         for i in range(n):
             k = int(power_law_int(rng, cfg.min_num_tags_per_person,

@@ -49,15 +49,17 @@ def _pass_budgets(pcts: list[float], degree: np.ndarray, upto: int) -> np.ndarra
 def _knows_block_task(task) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     """Generate pairs for ONE block of one pass. Top-level (picklable).
 
-    Task: (block_ids, want, degree, creat, base, floor, seed_words).
+    Task: (block_ids, want, have0, degree, creat, base, floor, seed_words).
     All arrays are block-aligned; ``j`` always refers inside the block.
+    ``have0`` is the global have-count entering this pass, so each pass adds
+    only its own budget instead of re-filling the cumulative want.
     Returns (src, dst, dates) int64 arrays with a < b (may contain duplicates
     across passes — resolved by the parent, like FriendshipMerger).
     """
-    block, want_b, degree_b, creat_b, base, floor, seed_words = task
+    block, want_b, have0_b, degree_b, creat_b, base, floor, seed_words = task
     rng = np.random.default_rng(np.random.SeedSequence(seed_words))
     B = len(block)
-    have_b = np.zeros(B, dtype=np.int64)
+    have_b = np.array(have0_b, dtype=np.int64)
     adj_b = [set() for _ in range(B)]
     out_a, out_b, out_d = [], [], []
     logb = math.log(base)
@@ -139,7 +141,7 @@ def generate_knows(cfg: DatagenConfig, n: int, city_idx: list[int],
         tasks = []
         for bi, b0 in enumerate(range(0, n, cfg.block_size)):
             blk = order[b0:b0 + cfg.block_size]
-            tasks.append((blk, want[blk], degree[blk], creat[blk],
+            tasks.append((blk, want[blk], have[blk], degree[blk], creat[blk],
                           base, floor, (seed + 1, s, bi)))
         if workers <= 1:
             results = [_knows_block_task(t) for t in tasks]

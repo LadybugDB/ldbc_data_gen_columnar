@@ -183,6 +183,7 @@ def _process_forum(f: int, members: list[int], ftags: list[int],
         if n_posts == 0:
             return pid, cid
         base_len = n_comments_f / n_posts
+        hot_sigma = ctx["hot_sigma"]
 
         def pick_replier(parent: int) -> int:
             # official: ~85% of repliers know the parent's author
@@ -192,7 +193,11 @@ def _process_forum(f: int, members: list[int], ftags: list[int],
             return int(rng.integers(0, n))
 
         for _ in range(n_posts):
-            author = members[int(rng.integers(0, len(members)))]
+            author = (members[int(rng.integers(0, len(members)))] if members
+                      else int(rng.integers(0, n)))
+            # per-message hotness: correlates replies and likes on the same
+            # message (official q4/q7 need tags x likes x replies to collide)
+            hot = float(np.exp(rng.normal(0.0, hot_sigma) - 0.5 * hot_sigma ** 2))
             cd = int(creations[author] + int(rng.integers(0, 300 * 86_400_000)))
             tag_words = [ctx["tag_names"][t % len(ctx["tag_names"])] for t in ftags[:2]]
             length = int(rng.integers(20, 60))
@@ -216,7 +221,7 @@ def _process_forum(f: int, members: list[int], ftags: list[int],
             # comment threads on this post: the forum's comment budget is
             # split into segments of <=20 replies (official per-parent cap),
             # so big forums keep their full share of comments
-            remaining = min(int(rng.poisson(base_len)), n_comments_f)
+            remaining = int(rng.poisson(base_len * hot))
             while remaining > 0:
                 tlen = min(remaining, 20)
                 remaining -= tlen
@@ -245,7 +250,9 @@ def _process_forum(f: int, members: list[int], ftags: list[int],
                             out["c_tag_f"].append(cid); out["c_tag_t"].append(int(t))
                     if rng.random() < sc["comment_liked_frac"]:
                         nl = int(h["likes_per_msg"].sample(rng)[0]
-                                 * ctx["comment_like_factor"])
+                                 * ctx["comment_like_factor"]
+                                 * float(np.exp(rng.normal(0.0, hot_sigma)
+                                                - 0.5 * hot_sigma ** 2)))
                         for _ in range(nl):
                             liker = int(rng.integers(0, n))
                             out["like_c_f"].append(liker); out["like_c_t"].append(cid)
@@ -255,7 +262,7 @@ def _process_forum(f: int, members: list[int], ftags: list[int],
                     cid += 1
             if rng.random() < sc["post_liked_frac"]:
                 nl = int(h["likes_per_msg"].sample(rng)[0]
-                         * ctx["post_like_factor"])
+                         * ctx["post_like_factor"] * hot)
                 for _ in range(nl):
                     liker = int(rng.integers(0, n))
                     out["like_p_f"].append(liker); out["like_p_t"].append(pid)
@@ -334,11 +341,12 @@ def _messages_shard(task) -> tuple[int, dict[str, list], int, int]:
     tags_of_forum = ctx["tags_of_forum"]
     out = {k: [] for k in _MSG_LIST_KEYS}
     pid = cid = 0
+    off_mode = ctx.get("off") is not None
     for f in range(f0, f1):
         members = members_of.get(f)
-        if not members:
+        if not members and not off_mode:
             continue
-        pid, cid = _process_forum(f, members, tags_of_forum.get(f, [0]), out, pid, cid, ctx)
+        pid, cid = _process_forum(f, members or [], tags_of_forum.get(f, [0]), out, pid, cid, ctx)
     return shard_idx, out, pid, cid
 
 
@@ -427,7 +435,7 @@ def generate_messages(cfg: DatagenConfig, d: Dictionaries, n: int,
     comment_rate = 0.0
     if off is not None:
         # comments_f ~ members^comment_rate-exp; rate s.t. total == official
-        exp = 1.193
+        exp = 1.095
         s = sum(len(v) ** exp for v in members_of.values())
         comment_rate = ((off.scalars["n_comments"] * n / off.scalars["n_persons"]) / s
                         / (1 - off.scalars["forums_no_post_frac"])) if s else 0.0
@@ -442,9 +450,10 @@ def generate_messages(cfg: DatagenConfig, d: Dictionaries, n: int,
         "posts_factor": (off.scalars["n_posts"] * n / off.scalars["n_persons"])
         / (max(1, n_forums) * (1 - off.scalars["forums_no_post_frac"])
            * off.hists["posts_per_forum"].mean) if off is not None else 1.0,
-        "comment_exp": 1.193,
+        "comment_exp": 1.095,
         "comment_rate": comment_rate,
         "friends": friends,
+        "hot_sigma": 1.49,  # mean-1 lognormal, E[h^2]=9.2
         "post_like_factor": 9.444 / off.hists["likes_per_msg"].mean,
         "comment_like_factor": 21.566 / off.hists["likes_per_msg"].mean,
     }

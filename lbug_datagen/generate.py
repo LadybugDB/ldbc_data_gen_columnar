@@ -50,6 +50,9 @@ def build_tables(cfg: DatagenConfig, log=print) -> dict[str, pa.Table]:
     log(f"persons ({cfg.num_persons}): {time.time()-t0:.2f}s")
 
     n_persons = cfg.num_persons
+    if o is not None:
+        # LSQB-calibrated knows pass mix (fewer correlated, more random edges)
+        cfg.knows_percentages = (0.36, 0.36, 0.28)
     t0 = time.time()
     degree = None
     if o is not None:

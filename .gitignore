@@ -6,3 +6,6 @@ __pycache__/
 *.egg-info/
 dist/
 build/
+sf1*.lbdb
+sf1-official.lbdb
+nohup.out

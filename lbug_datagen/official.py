@@ -143,6 +143,10 @@ class Official:
         self.university_ids = np.array(uni, dtype=np.int64)
         self.company_ids = np.array(comp, dtype=np.int64)
 
+        cpc = {}
+        for a, b in zip(ip["FROM"], ip["TO"]):
+            cpc[a] = b  # city id -> country id
+        self._city_country = cpc
         cp = _csv(RES / "citypop.csv")
         w = np.array(cp["persons"], dtype=float)
         self.city_ids = np.array(cp["city"], dtype=np.int64)
@@ -162,6 +166,13 @@ class Official:
             "companyIsLocatedIn": self.companyIsLocatedIn,
             "universityIsLocatedIn": self.universityIsLocatedIn,
         }
+
+    def city_country_idx(self, place_ids) -> np.ndarray:
+        """country index (0..110) per city place id."""
+        countries = sorted({c for c in self._city_country.values()})
+        rank = {c: i for i, c in enumerate(countries)}
+        return np.array([rank[self._city_country.get(int(c), 0)] for c in place_ids],
+                        dtype=np.int64)
 
     def person_place_ids(self, n: int, rng: np.random.Generator) -> np.ndarray:
         """City place-id per person: exact official assignment at sf1."""
