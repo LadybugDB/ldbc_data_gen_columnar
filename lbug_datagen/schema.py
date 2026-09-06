@@ -4,56 +4,43 @@ Single source of truth for the .lbdb layout this datagen writes.
 """
 from __future__ import annotations
 
-SCHEMA_DDL = """
-CREATE NODE TABLE Comment(ID INT64 PRIMARY KEY, creationDate TIMESTAMP, locationIP STRING, browserUsed STRING, content STRING, length INT64);
-CREATE NODE TABLE Forum(ID INT64 PRIMARY KEY, title STRING, creationDate TIMESTAMP);
-CREATE NODE TABLE Company(ID INT64 PRIMARY KEY, name STRING, url STRING);
-CREATE NODE TABLE University(ID INT64 PRIMARY KEY, name STRING, url STRING);
-CREATE NODE TABLE Person(ID INT64 PRIMARY KEY, firstName STRING, lastName STRING, gender STRING, birthday DATE, creationDate TIMESTAMP, locationIP STRING, browserUsed STRING);
-CREATE NODE TABLE Continent(ID INT64 PRIMARY KEY, name STRING, url STRING);
-CREATE NODE TABLE Country(ID INT64 PRIMARY KEY, name STRING, url STRING);
-CREATE NODE TABLE City(ID INT64 PRIMARY KEY, name STRING, url STRING);
-CREATE NODE TABLE Post(ID INT64 PRIMARY KEY, imageFile STRING, creationDate TIMESTAMP, locationIP STRING, browserUsed STRING, language STRING, content STRING, length INT64);
-CREATE NODE TABLE Tag(ID INT64 PRIMARY KEY, name STRING, url STRING);
-CREATE NODE TABLE Tagclass(ID INT64 PRIMARY KEY, name STRING, url STRING);
-CREATE REL TABLE containerOf(FROM Forum TO Post, ONE_MANY);
-CREATE REL TABLE commentHasCreator(FROM Comment TO Person, MANY_ONE);
-CREATE REL TABLE postHasCreator(FROM Post TO Person, MANY_ONE);
-CREATE REL TABLE hasInterest(FROM Person TO Tag);
-CREATE REL TABLE hasMember(FROM Forum TO Person, joinDate TIMESTAMP);
-CREATE REL TABLE hasModerator(FROM Forum TO Person, MANY_ONE);
-CREATE REL TABLE commentHasTag(FROM Comment TO Tag);
-CREATE REL TABLE forumHasTag(FROM Forum TO Tag);
-CREATE REL TABLE postHasTag(FROM Post TO Tag);
-CREATE REL TABLE hasType(FROM Tag TO Tagclass, MANY_ONE);
-CREATE REL TABLE commentIsLocatedIn(FROM Comment TO City, MANY_ONE);
-CREATE REL TABLE companyIsLocatedIn(FROM Company TO Country, MANY_ONE);
-CREATE REL TABLE universityIsLocatedIn(FROM University TO City, MANY_ONE);
-CREATE REL TABLE personIsLocatedIn(FROM Person TO City, MANY_ONE);
-CREATE REL TABLE postIsLocatedIn(FROM Post TO City, MANY_ONE);
-CREATE REL TABLE cityIsPartOfCountry(FROM City TO Country, MANY_ONE);
-CREATE REL TABLE countryIsPartOfContinent(FROM Country TO Continent, MANY_ONE);
-CREATE REL TABLE isSubclassOf(FROM Tagclass TO Tagclass, MANY_ONE);
-CREATE REL TABLE knows(FROM Person TO Person, creationDate TIMESTAMP);
-CREATE REL TABLE likeComment(FROM Person TO Comment, creationDate TIMESTAMP);
-CREATE REL TABLE likePost(FROM Person TO Post, creationDate TIMESTAMP);
-CREATE REL TABLE replyOfComment(FROM Comment TO Comment, MANY_ONE);
-CREATE REL TABLE replyOfPost(FROM Comment TO Post, MANY_ONE);
-CREATE REL TABLE studyAt(FROM Person TO University, classYear INT64);
-CREATE REL TABLE workAt(FROM Person TO Company, workFrom INT64);
-""".strip()
+SCHEMA_DDL = """CREATE NODE TABLE Company(CompanyId INT64, PRIMARY KEY (CompanyId));
+CREATE NODE TABLE University(UniversityId INT64, PRIMARY KEY (UniversityId));
+CREATE NODE TABLE Continent(ContinentId INT64, PRIMARY KEY (ContinentId));
+CREATE NODE TABLE Country(CountryId INT64, PRIMARY KEY (CountryId));
+CREATE NODE TABLE City(CityId INT64, PRIMARY KEY (CityId));
+CREATE NODE TABLE Tag(TagId INT64, PRIMARY KEY (TagId));
+CREATE NODE TABLE TagClass(TagClassId INT64, PRIMARY KEY (TagClassId));
+CREATE NODE TABLE Forum(ForumId INT64, PRIMARY KEY (ForumId));
+CREATE NODE TABLE Message(MessageId INT64, PRIMARY KEY (MessageId));
+CREATE NODE TABLE Person(PersonId INT64, PRIMARY KEY (PersonId));
+
+CREATE REL TABLE City_isPartOf_Country(FROM City TO Country);
+CREATE REL TABLE Message_hasCreator_Person(FROM Message TO Person);
+CREATE REL TABLE Message_hasTag_Tag(From Message TO Tag);
+CREATE REL TABLE Message_isLocatedIn_Country(FROM Message TO Country);
+CREATE REL TABLE Message_replyOf_Message(FROM Message TO Message);
+CREATE REL TABLE Comment_replyOf_Post(FROM Message TO Message);
+CREATE REL TABLE Company_isLocatedIn_Country(FROM Company TO Country);
+CREATE REL TABLE Country_isPartOf_Continent(FROM Country TO Continent);
+CREATE REL TABLE Forum_containerOf_Message(FROM Forum TO Message);
+CREATE REL TABLE Forum_hasMember_Person(FROM Forum TO Person);
+CREATE REL TABLE Forum_hasModerator_Person(FROM Forum TO Person);
+CREATE REL TABLE Forum_hasTag_Tag(FROM Forum TO Tag);
+CREATE REL TABLE Person_hasInterest_Tag(FROM Person TO Tag);
+CREATE REL TABLE Person_isLocatedIn_City(FROM Person TO City);
+CREATE REL TABLE Person_knows_Person(FROM Person TO Person);
+CREATE REL TABLE Person_likes_Message(FROM Person TO Message);
+CREATE REL TABLE Person_studyAt_University(FROM Person TO University);
+CREATE REL TABLE Person_workAt_Company(FROM Person TO Company);
+CREATE REL TABLE TagClass_isSubclassOf_TagClass(FROM TagClass TO TagClass);
+CREATE REL TABLE Tag_hasType_TagClass(FROM Tag TO TagClass);
+CREATE REL TABLE University_isLocatedIn_City(FROM University TO City);""".strip()
 
 # Secondary ART indexes (same set as ladybugdb/build_graph.py); created AFTER
 # bulk load so index build doesn't slow down ingestion. Emitted as a .cypher
 # script via --secondary (never created inline by the generator).
-SECONDARY_INDEXES: list[tuple[str, str]] = [
-    ("City", "name"),
-    ("Tag", "name"),
-    ("Person", "firstName"),
-    ("Person", "lastName"),
-    ("Person", "birthday"),
-    ("Comment", "length"),
-]
+SECONDARY_INDEXES: list[tuple[str, str]] = []
 
 
 def secondary_cypher() -> str:

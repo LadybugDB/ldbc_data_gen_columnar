@@ -101,6 +101,8 @@ class Official:
         self.countryIsPartOfContinent = pa.table(
             {"FROM": pa.array([e[0] for e in zip(ip["FROM"], ip["TO"]) if e[0] not in city_ids_set], pa.int64()),
              "TO": pa.array([e[1] for e in zip(ip["FROM"], ip["TO"]) if e[0] not in city_ids_set], pa.int64())})
+        # city place id -> country place id (for Message_isLocatedIn_Country)
+        self.city_country_id = dict(cc)
 
         tc = _csv(RES / "tagclass.csv")
         self.tagclass = pa.table({
@@ -158,13 +160,14 @@ class Official:
         return {
             "Continent": self.continent, "Country": self.country,
             "City": self.city,
-            "cityIsPartOfCountry": self.cityIsPartOfCountry,
-            "countryIsPartOfContinent": self.countryIsPartOfContinent,
-            "Tagclass": self.tagclass, "isSubclassOf": self.isSubclassOf,
-            "Tag": self.tag, "hasType": self.hasType,
+            "City_isPartOf_Country": self.cityIsPartOfCountry,
+            "Country_isPartOf_Continent": self.countryIsPartOfContinent,
+            "TagClass": self.tagclass,
+            "TagClass_isSubclassOf_TagClass": self.isSubclassOf,
+            "Tag": self.tag, "Tag_hasType_TagClass": self.hasType,
             "Company": self.company, "University": self.university,
-            "companyIsLocatedIn": self.companyIsLocatedIn,
-            "universityIsLocatedIn": self.universityIsLocatedIn,
+            "Company_isLocatedIn_Country": self.companyIsLocatedIn,
+            "University_isLocatedIn_City": self.universityIsLocatedIn,
         }
 
     def city_country_idx(self, place_ids) -> np.ndarray:

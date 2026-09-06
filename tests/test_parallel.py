@@ -6,6 +6,7 @@ from lbug_datagen.bulk import load_nodes, load_rels
 from lbug_datagen.dictionaries import Dictionaries
 from lbug_datagen.knows import generate_knows
 from lbug_datagen.params import DatagenConfig
+from lbug_datagen import official as _off
 from lbug_datagen.schema import SCHEMA_DDL
 
 
@@ -17,9 +18,13 @@ def _small_inputs(n=60, seed=11):
     from lbug_datagen.person import generate_persons
     from lbug_datagen.static_graph import generate_static
     static = generate_static(d)
-    city_ids = static.pop("_city_id")
+    if "_official_city_ids" in static:
+        city_ids = static.pop("_official_city_ids")
+        static.pop("_official_city_probs", None)
+    else:
+        city_ids = static.pop("_city_id")
     n_tags = static.pop("_tag_count")["n"][0].as_py()
-    persons = generate_persons(cfg, d, city_ids, n_tags, seed)
+    persons = generate_persons(cfg, d, city_ids, n_tags, seed, o=_off.get())
     city_idx = persons.pop("_person_city")["city"].to_pylist()
     creations = persons.pop("_person_creation")["creationDate"].to_pylist()
     return cfg, d, persons, city_idx, creations
@@ -38,9 +43,9 @@ def _sorted(t: pa.Table) -> pa.Table:
 
 def test_knows_worker_invariant():
     cfg, _, persons, city_idx, creations = _small_inputs()
-    k1 = generate_knows(cfg, cfg.num_persons, city_idx, persons["hasInterest"],
+    k1 = generate_knows(cfg, cfg.num_persons, city_idx, persons["Person_hasInterest_Tag"],
                         creations, cfg.seed, log=lambda *a: None, workers=1)
-    k2 = generate_knows(cfg, cfg.num_persons, city_idx, persons["hasInterest"],
+    k2 = generate_knows(cfg, cfg.num_persons, city_idx, persons["Person_hasInterest_Tag"],
                         creations, cfg.seed, log=lambda *a: None, workers=2)
     assert k1.num_rows > 0
     assert _sorted(k1).equals(_sorted(k2))
@@ -49,24 +54,25 @@ def test_knows_worker_invariant():
 def test_messages_worker_invariant_and_valid():
     cfg, d, persons, city_idx, creations = _small_inputs()
     forums = generate_forums(cfg, d, cfg.num_persons, city_idx, creations,
-                             persons["hasInterest"], cfg.seed)
+                             persons["Person_hasInterest_Tag"], cfg.seed)
     n_forums = forums.pop("_forum_of")
     forums.pop("_cont_placeholder", None)
     m1 = generate_messages(cfg, d, cfg.num_persons, n_forums, creations,
-                           forums["hasMember"], forums["forumHasTag"],
+                           forums["Forum_hasMember_Person"], forums["Forum_hasTag_Tag"],
                            cfg.seed, workers=1)
     m3 = generate_messages(cfg, d, cfg.num_persons, n_forums, creations,
-                           forums["hasMember"], forums["forumHasTag"],
+                           forums["Forum_hasMember_Person"], forums["Forum_hasTag_Tag"],
                            cfg.seed, workers=3)
     for k in m1:
         assert _sorted(m1[k]).equals(_sorted(m3[k])), k
-    np_ = m1["Post"].num_rows
-    nc = m1["Comment"].num_rows
-    for tbl, col, bound in [("replyOfPost", "TO", np_), ("likePost", "TO", np_),
-                            ("containerOf", "TO", np_),
-                            ("postHasCreator", "FROM", np_),
-                            ("replyOfPost", "FROM", nc),
-                            ("commentHasCreator", "FROM", nc)]:
+    np_ = m1["Forum_containerOf_Message"].num_rows
+    nc = m1["Message"].num_rows - np_
+    for tbl, col, bound in [("Message_replyOf_Message", "TO", np_ + nc),
+                            ("Person_likes_Message", "TO", np_ + nc),
+                            ("Forum_containerOf_Message", "TO", np_),
+                            ("Message_hasCreator_Person", "FROM", np_ + nc),
+                            ("Comment_replyOf_Post", "FROM", np_ + nc),
+                            ("Message_replyOf_Message", "FROM", np_ + nc)]:
         vals = m1[tbl][col].to_pylist()
         assert all(0 <= v < bound for v in vals), (tbl, col)
 
@@ -77,14 +83,8 @@ def test_secondary_flag_writes_runnable_cypher(tmp_path):
     main(["--num-persons", "20", "--seed", "5", "--out", out, "--secondary"])
     sidecar = tmp_path / "tiny.secondary.cypher"
     assert sidecar.exists()
-    cypher = sidecar.read_text()
-    assert "CREATE ART INDEX Person_firstName_art" in cypher
-    import ladybug as lb
-    conn = lb.Connection(lb.Database(out))
-    for stmt in [s.strip() for s in cypher.split(";") if s.strip()]:
-        conn.execute(stmt)
-    idx = conn.execute("CALL show_indexes() RETURN *").get_as_df().to_string()
-    assert "Person_firstName_art" in idx
+    # ids-only LSQB schema: no secondary ART indexes apply
+    assert sidecar.read_text().strip() == ""
 
 
 def test_stale_artifacts_removed(tmp_path):
@@ -116,23 +116,13 @@ def test_person_pk_hash_index(tmp_path):
     for stmt in [s.strip() for s in SCHEMA_DDL.split(";") if s.strip()]:
         conn.execute(stmt)
     tables = {
-        "Person": pa.table({"ID": [1, 2, 3],
-                            "firstName": ["a", "b", "c"],
-                            "lastName": ["x", "y", "z"],
-                            "gender": ["male", "female", "male"],
-                            "birthday": ["1990-01-01"] * 3,
-                            "creationDate": pa.array([1710000000000] * 3,
-                                                     type=pa.timestamp("ms")),
-                            "locationIP": ["1.1.1.1"] * 3,
-                            "browserUsed": ["Chrome"] * 3}),
-        "knows": pa.table({"FROM": [1, 2], "TO": [2, 3],
-                           "creationDate": pa.array([1710000000000] * 2,
-                                                    type=pa.timestamp("ms"))}),
+        "Person": pa.table({"ID": [1, 2, 3]}),
+        "Person_knows_Person": pa.table({"FROM": [1, 2], "TO": [2, 3]}),
     }
     load_nodes(conn, tables, log=lambda *a: None)
-    conn.execute("CREATE HASH INDEX person_pk_hx FOR (n:Person) ON (n.ID)")
+    conn.execute("CREATE HASH INDEX person_pk_hx FOR (n:Person) ON (n.PersonId)")
     load_rels(conn, tables, log=lambda *a: None)
     assert conn.execute("MATCH (p:Person) RETURN count(*)").get_as_df().iloc[0, 0] == 3
-    assert conn.execute("MATCH (a)-[e:knows]->(b) RETURN count(*)").get_as_df().iloc[0, 0] == 2
+    assert conn.execute("MATCH (a)-[e:Person_knows_Person]->(b) RETURN count(*)").get_as_df().iloc[0, 0] == 2
     idx = conn.execute("CALL show_indexes() RETURN *").get_as_df()
     assert "person_pk_hx" in idx.to_string()

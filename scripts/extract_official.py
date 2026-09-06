@@ -43,7 +43,8 @@ def main():
               + rows(con, "MATCH (p:Country) RETURN p.CountryId, 'Country' ORDER BY p.CountryId")
               + rows(con, "MATCH (p:City) RETURN p.CityId, 'City' ORDER BY p.CityId"))
     write_csv(OUT / "isPartOf.csv", ["FROM", "TO"],
-              rows(con, "MATCH (a:City)-[e:City_isPartOf_Country]->(b:Country) RETURN a.CityId, b.CountryId"))
+              rows(con, "MATCH (a:City)-[e:City_isPartOf_Country]->(b:Country) RETURN a.CityId, b.CountryId")
+              + rows(con, "MATCH (a:Country)-[e:Country_isPartOf_Continent]->(b:Continent) RETURN a.CountryId, b.ContinentId"))
     write_csv(OUT / "tagclass.csv", ["ID"],
               rows(con, "MATCH (t:TagClass) RETURN t.TagClassId ORDER BY t.TagClassId"))
     write_csv(OUT / "isSubclassOf.csv", ["FROM", "TO"],

@@ -52,23 +52,23 @@ def generate_static(d: Dictionaries) -> dict[str, pa.Table]:
         tables[key] = pa.table({"ID": [place_ids[i] for i in idx],
                                 "name": [place_names[i] for i in idx],
                                 "url": [place_urls[i] for i in idx]})
-    tables["cityIsPartOfCountry"] = pa.table({"FROM": part_from[len(continents):],
+    tables["City_isPartOf_Country"] = pa.table({"FROM": part_from[len(continents):],
                                               "TO": part_to[len(continents):]})
-    tables["countryIsPartOfContinent"] = pa.table({"FROM": part_from[:len(continents)],
+    tables["Country_isPartOf_Continent"] = pa.table({"FROM": part_from[:len(continents)],
                                                    "TO": part_to[:len(continents)]})
 
     # --- TagClasses (tiny fixed hierarchy) + Tags ---
     tc_names = ["Music", "Sports", "Culture", "Nature"]
-    tables["Tagclass"] = pa.table({
+    tables["TagClass"] = pa.table({
         "ID": list(range(len(tc_names))),
         "name": tc_names,
         "url": [f"http://example.org/tc/{n}" for n in tc_names]})
-    tables["isSubclassOf"] = pa.table({"FROM": [1, 2, 3], "TO": [0, 0, 0]})
+    tables["TagClass_isSubclassOf_TagClass"] = pa.table({"FROM": [1, 2, 3], "TO": [0, 0, 0]})
     tables["Tag"] = pa.table({
         "ID": list(range(len(d.tag_names))),
         "name": d.tag_names,
         "url": [f"http://example.org/tag/{n}" for n in d.tag_names]})
-    tables["hasType"] = pa.table({
+    tables["Tag_hasType_TagClass"] = pa.table({
         "FROM": list(range(len(d.tag_names))),
         "TO": [i % len(tc_names) for i in range(len(d.tag_names))]})
 
@@ -87,9 +87,10 @@ def generate_static(d: Dictionaries) -> dict[str, pa.Table]:
         comp_loc.append(country_id[d.cities[i][1]])
     tables["University"] = pa.table({"ID": uni_ids, "name": uni_names, "url": uni_urls})
     tables["Company"] = pa.table({"ID": comp_ids, "name": comp_names, "url": comp_urls})
-    tables["universityIsLocatedIn"] = pa.table({"FROM": uni_ids, "TO": uni_loc})
-    tables["companyIsLocatedIn"] = pa.table({"FROM": comp_ids, "TO": comp_loc})
+    tables["University_isLocatedIn_City"] = pa.table({"FROM": uni_ids, "TO": uni_loc})
+    tables["Company_isLocatedIn_Country"] = pa.table({"FROM": comp_ids, "TO": comp_loc})
 
     tables["_city_id"] = city_id  # helper, dropped before load
+    tables["_city_country"] = {city_id[c]: country_id[k] for c, k in d.cities}
     tables["_tag_count"] = pa.table({"n": [len(d.tag_names)]})
     return tables

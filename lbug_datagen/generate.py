@@ -42,11 +42,14 @@ def build_tables(cfg: DatagenConfig, log=print) -> dict[str, pa.Table]:
     log(f"static: {time.time()-t0:.2f}s")
 
     t0 = time.time()
+    city_country = static.pop("_city_country", None)
     persons = generate_persons(cfg, d, city_ids, n_tags, cfg.seed, o=o)
     city_idx = persons.pop("_person_city")["city"].to_pylist()
     person_place = (persons.pop("_person_place")["place"].to_pylist()
                     if o is not None else None)
     creations = persons.pop("_person_creation")["creationDate"].to_pylist()
+    person_country = ([city_country[int(c)] for c in person_place]
+                      if o is not None and city_country else None)
     log(f"persons ({cfg.num_persons}): {time.time()-t0:.2f}s")
 
     n_persons = cfg.num_persons
@@ -62,14 +65,14 @@ def build_tables(cfg: DatagenConfig, log=print) -> dict[str, pa.Table]:
     target_pairs = (int(o.scalars["knows_undirected"] * n_persons
                         / o.scalars["n_persons"]) if o is not None else None)
     knows = generate_knows(cfg, n_persons, city_idx,
-                           persons["hasInterest"], creations, cfg.seed,
+                           persons["Person_hasInterest_Tag"], creations, cfg.seed,
                            log=log, workers=cfg.workers, degree=degree,
                            target_pairs=target_pairs)
     log(f"knows ({knows.num_rows}): {time.time()-t0:.2f}s")
 
     t0 = time.time()
     forums = generate_forums(cfg, d, cfg.num_persons, city_idx, creations,
-                             persons["hasInterest"], cfg.seed,
+                             persons["Person_hasInterest_Tag"], cfg.seed,
                              o=o, n_tags=n_tags)
     n_forums: int = forums.pop("_forum_of")  # type: ignore
     forums.pop("_cont_placeholder", None)
@@ -84,13 +87,15 @@ def build_tables(cfg: DatagenConfig, log=print) -> dict[str, pa.Table]:
         for a, b in zip(kf, kt):
             friends.setdefault(a, []).append(b)  # knows is bidirectional
     msgs = generate_messages(cfg, d, cfg.num_persons, n_forums, creations,
-                             forums["hasMember"], forums["forumHasTag"], cfg.seed,
+                             forums["Forum_hasMember_Person"], forums["Forum_hasTag_Tag"], cfg.seed,
                              workers=cfg.workers, off=o, n_tags=n_tags,
-                             person_place=person_place, friends=friends)
-    log(f"messages (posts={msgs['Post'].num_rows}, comments={msgs['Comment'].num_rows}): "
+                             person_place=person_place, person_country=person_country,
+                             friends=friends)
+    posts = msgs["Forum_containerOf_Message"].num_rows
+    log(f"messages (posts={posts}, comments={msgs['Message'].num_rows - posts}): "
         f"{time.time()-t0:.2f}s")
 
-    return {**static, **persons, "knows": knows, **forums, **msgs}
+    return {**static, **persons, "Person_knows_Person": knows, **forums, **msgs}
 
 
 def write_lbdb(cfg: DatagenConfig, out: str, log=print) -> dict[str, int]:
@@ -124,7 +129,7 @@ def write_lbdb(cfg: DatagenConfig, out: str, log=print) -> dict[str, int]:
     # above for bulk load). Speeds up rel-endpoint probes below and all later
     # PK lookups. ART/secondary indexes are intentionally NOT created here.
     t0 = time.time()
-    conn.execute("CREATE HASH INDEX person_pk_hx FOR (n:Person) ON (n.ID)")
+    conn.execute("CREATE HASH INDEX person_pk_hx FOR (n:Person) ON (n.PersonId)")
     log(f"hash index person_pk_hx: {time.time()-t0:.2f}s")
     counts.update(load_rels(conn, tables, cfg.arrow_chunk, log,
                             db=db, workers=cfg.workers))

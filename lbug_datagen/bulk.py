@@ -26,76 +26,56 @@ import pyarrow as pa
 
 # node table -> [(real_prop, arrow_col, cast)] ; cast wraps the expression.
 NODE_COPIES: dict[str, list[tuple[str, str, str]]] = {
-    "Person": [("ID", "ID", "{e}"), ("firstName", "firstName", "{e}"),
-               ("lastName", "lastName", "{e}"), ("gender", "gender", "{e}"),
-               ("birthday", "birthday", "date({e})"),
-               ("creationDate", "creationDate", "{e}"),
-               ("locationIP", "locationIP", "{e}"),
-               ("browserUsed", "browserUsed", "{e}")],
-    "Continent": [("ID", "ID", "{e}"), ("name", "name", "{e}"),
-                  ("url", "url", "{e}")],
-    "Country": [("ID", "ID", "{e}"), ("name", "name", "{e}"),
-                ("url", "url", "{e}")],
-    "City": [("ID", "ID", "{e}"), ("name", "name", "{e}"),
-             ("url", "url", "{e}")],
-    "Company": [("ID", "ID", "{e}"), ("name", "name", "{e}"),
-                ("url", "url", "{e}")],
-    "University": [("ID", "ID", "{e}"), ("name", "name", "{e}"),
-                   ("url", "url", "{e}")],
-    "Tag": [("ID", "ID", "{e}"), ("name", "name", "{e}"), ("url", "url", "{e}")],
-    "Tagclass": [("ID", "ID", "{e}"), ("name", "name", "{e}"), ("url", "url", "{e}")],
-    "Forum": [("ID", "ID", "{e}"), ("title", "title", "{e}"),
-              ("creationDate", "creationDate", "{e}")],
-    "Post": [("ID", "ID", "{e}"), ("imageFile", "imageFile", "{e}"),
-             ("creationDate", "creationDate", "{e}"),
-             ("locationIP", "locationIP", "{e}"),
-             ("browserUsed", "browserUsed", "{e}"),
-             ("language", "language", "{e}"), ("content", "content", "{e}"),
-             ("length", "length", "{e}")],
-    "Comment": [("ID", "ID", "{e}"), ("creationDate", "creationDate", "{e}"),
-                ("locationIP", "locationIP", "{e}"),
-                ("browserUsed", "browserUsed", "{e}"),
-                ("content", "content", "{e}"), ("length", "length", "{e}")],
+    "Company": [("CompanyId", "ID", "{e}")],
+    "University": [("UniversityId", "ID", "{e}")],
+    "Continent": [("ContinentId", "ID", "{e}")],
+    "Country": [("CountryId", "ID", "{e}")],
+    "City": [("CityId", "ID", "{e}")],
+    "Tag": [("TagId", "ID", "{e}")],
+    "TagClass": [("TagClassId", "ID", "{e}")],
+    "Forum": [("ForumId", "ID", "{e}")],
+    "Message": [("MessageId", "ID", "{e}")],
+    "Person": [("PersonId", "ID", "{e}")],
 }
 
 # rel table -> (from_node, to_node, [(real_prop, arrow_col)])
 REL_COPIES: dict[str, tuple[str, str, list[tuple[str, str]]]] = {
-    "knows": ("Person", "Person", [("creationDate", "creationDate")]),
-    "hasMember": ("Forum", "Person", [("joinDate", "joinDate")]),
-    "likePost": ("Person", "Post", [("creationDate", "creationDate")]),
-    "likeComment": ("Person", "Comment", [("creationDate", "creationDate")]),
-    "studyAt": ("Person", "University", [("classYear", "classYear")]),
-    "workAt": ("Person", "Company", [("workFrom", "workFrom")]),
-    "containerOf": ("Forum", "Post", []),
-    "commentHasCreator": ("Comment", "Person", []),
-    "postHasCreator": ("Post", "Person", []),
-    "hasInterest": ("Person", "Tag", []),
-    "hasModerator": ("Forum", "Person", []),
-    "commentHasTag": ("Comment", "Tag", []),
-    "forumHasTag": ("Forum", "Tag", []),
-    "postHasTag": ("Post", "Tag", []),
-    "hasType": ("Tag", "Tagclass", []),
-    "commentIsLocatedIn": ("Comment", "City", []),
-    "companyIsLocatedIn": ("Company", "Country", []),
-    "universityIsLocatedIn": ("University", "City", []),
-    "personIsLocatedIn": ("Person", "City", []),
-    "postIsLocatedIn": ("Post", "City", []),
-    "cityIsPartOfCountry": ("City", "Country", []),
-    "countryIsPartOfContinent": ("Country", "Continent", []),
-    "isSubclassOf": ("Tagclass", "Tagclass", []),
-    "replyOfComment": ("Comment", "Comment", []),
-    "replyOfPost": ("Comment", "Post", []),
+    "City_isPartOf_Country": ("City", "Country", []),
+    "Message_hasCreator_Person": ("Message", "Person", []),
+    "Message_hasTag_Tag": ("Message", "Tag", []),
+    "Message_isLocatedIn_Country": ("Message", "Country", []),
+    "Message_replyOf_Message": ("Message", "Message", []),
+    "Comment_replyOf_Post": ("Message", "Message", []),
+    "Company_isLocatedIn_Country": ("Company", "Country", []),
+    "Country_isPartOf_Continent": ("Country", "Continent", []),
+    "Forum_containerOf_Message": ("Forum", "Message", []),
+    "Forum_hasMember_Person": ("Forum", "Person", []),
+    "Forum_hasModerator_Person": ("Forum", "Person", []),
+    "Forum_hasTag_Tag": ("Forum", "Tag", []),
+    "Person_hasInterest_Tag": ("Person", "Tag", []),
+    "Person_isLocatedIn_City": ("Person", "City", []),
+    "Person_knows_Person": ("Person", "Person", []),
+    "Person_likes_Message": ("Person", "Message", []),
+    "Person_studyAt_University": ("Person", "University", []),
+    "Person_workAt_Company": ("Person", "Company", []),
+    "TagClass_isSubclassOf_TagClass": ("TagClass", "TagClass", []),
+    "Tag_hasType_TagClass": ("Tag", "TagClass", []),
+    "University_isLocatedIn_City": ("University", "City", []),
 }
 
-NODE_ORDER = ["Continent", "Country", "City", "Tagclass", "Tag",
-              "Company", "University", "Person", "Forum", "Post", "Comment"]
-REL_ORDER = ["cityIsPartOfCountry", "countryIsPartOfContinent", "isSubclassOf",
-             "hasType", "companyIsLocatedIn", "universityIsLocatedIn",
-             "personIsLocatedIn", "studyAt", "workAt", "hasInterest", "knows",
-             "hasModerator", "hasMember", "forumHasTag", "containerOf",
-             "postHasCreator", "postIsLocatedIn", "postHasTag",
-             "commentHasCreator", "commentIsLocatedIn", "commentHasTag",
-             "replyOfPost", "replyOfComment", "likePost", "likeComment"]
+NODE_ORDER = ["Continent", "Country", "City", "Company", "University",
+              "Tag", "TagClass", "Person", "Forum", "Message"]
+REL_ORDER = ["City_isPartOf_Country", "Country_isPartOf_Continent",
+             "TagClass_isSubclassOf_TagClass", "Tag_hasType_TagClass",
+             "Company_isLocatedIn_Country", "University_isLocatedIn_City",
+             "Person_isLocatedIn_City", "Person_hasInterest_Tag",
+             "Person_studyAt_University", "Person_workAt_Company",
+             "Person_knows_Person", "Forum_hasModerator_Person",
+             "Forum_hasMember_Person", "Forum_hasTag_Tag",
+             "Message_hasCreator_Person", "Message_isLocatedIn_Country",
+             "Message_hasTag_Tag", "Message_replyOf_Message",
+             "Comment_replyOf_Post", "Forum_containerOf_Message",
+             "Person_likes_Message"]
 
 
 DEFAULT_SETTINGS = (
@@ -180,6 +160,12 @@ def _copy_node_chunk(cp: _ConnProvider, arrow_name: str, real_table: str,
     return part.num_rows
 
 
+# real node tables use <Name>Id as PK property
+PK_PROP = {n: f"{n}Id" for n in
+           ["Company", "University", "Continent", "Country", "City", "Tag",
+            "TagClass", "Forum", "Message", "Person"]}
+
+
 def _copy_rel_chunk(cp: _ConnProvider, arrow_name: str, real_table: str,
                     idx: int, part: pa.Table, single: bool) -> int:
     src_t, dst_t, props = REL_COPIES[real_table]
@@ -191,7 +177,7 @@ def _copy_rel_chunk(cp: _ConnProvider, arrow_name: str, real_table: str,
     try:
         conn.execute(
             f"MATCH (n:{tmp}) MATCH (a:{src_t}), (b:{dst_t}) "
-            f"WHERE a.ID = n.FROM AND b.ID = n.TO "
+            f"WHERE a.{PK_PROP[src_t]} = n.FROM AND b.{PK_PROP[dst_t]} = n.TO "
             f"CREATE (a)-[e:{real_table}{prop_str}]->(b)")
     finally:
         try:

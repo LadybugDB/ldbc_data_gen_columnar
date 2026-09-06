@@ -46,6 +46,7 @@ def generate_forums(cfg: DatagenConfig, d: Dictionaries, n: int,
     mem_from, mem_to, mem_date = [], [], []
     ftag_from, ftag_to = [], []
     cont_from, cont_to = [], []
+    fid = 0
 
     if o is not None:
         # ---- official LSQB volumes ----
@@ -126,10 +127,9 @@ def generate_forums(cfg: DatagenConfig, d: Dictionaries, n: int,
     })
     out = {
         "Forum": forums,
-        "hasModerator": pa.table({"FROM": mod_from, "TO": mod_to}),
-        "hasMember": pa.table({"FROM": mem_from, "TO": mem_to,
-                               "joinDate": pa.array(mem_date, type=pa.timestamp("ms"))}),
-        "forumHasTag": pa.table({"FROM": ftag_from, "TO": ftag_to}),
+        "Forum_hasModerator_Person": pa.table({"FROM": mod_from, "TO": mod_to}),
+"Forum_hasMember_Person": pa.table({"FROM": mem_from, "TO": mem_to}),
+        "Forum_hasTag_Tag": pa.table({"FROM": ftag_from, "TO": ftag_to}),
         "_forum_of": fid,
     }
     # containerOf filled by messages.py
@@ -166,7 +166,7 @@ def _process_forum(f: int, members: list[int], ftags: list[int],
     rng = np.random.default_rng(np.random.SeedSequence([ctx["seed"] + 3, f]))
     creations = ctx["creations"]
     n = ctx["n"]
-    person_place = ctx.get("person_place")
+    person_country = ctx.get("person_country")
     off = ctx.get("off")
     p0 = pid
     if off is not None:
@@ -212,7 +212,7 @@ def _process_forum(f: int, members: list[int], ftags: list[int],
             out["post_len"].append(length)
             out["post_creator_f"].append(pid); out["post_creator_t"].append(author)
             out["post_loc_f"].append(pid)
-            out["post_loc_t"].append(int(person_place[author]) if person_place else 0)
+            out["post_loc_t"].append(int(person_country[author]) if person_country else 0)
             if rng.random() < sc["post_tagged_frac"]:
                 for t in rng.choice(n_tags, size=min(int(h["tags_per_post"].sample(rng)[0]), n_tags),
                                     replace=False):
@@ -239,7 +239,7 @@ def _process_forum(f: int, members: list[int], ftags: list[int],
                     out["c_ct"].append(_text(rng, ["reply"], length)); out["c_len"].append(length)
                     out["c_creator_f"].append(cid); out["c_creator_t"].append(replier)
                     out["c_loc_f"].append(cid)
-                    out["c_loc_t"].append(int(person_place[replier]) if person_place else 0)
+                    out["c_loc_t"].append(int(person_country[replier]) if person_country else 0)
                     if to_comment:
                         out["rcomm_f"].append(cid); out["rcomm_t"].append(last)
                     else:
@@ -355,13 +355,15 @@ def _merge_shards(shards: list[tuple[int, dict[str, list], int, int]]
     """Merge shard-local lists to global ids (prefix-sum rebase)."""
     shards = sorted(shards, key=lambda s: s[0])
     master = {k: [] for k in _MSG_LIST_KEYS}
+    # unified Message id space: posts [0, P), comments [P, P+C)
+    post_total = sum(n_posts for _, _, n_posts, _ in shards)
     post_off = comm_off = 0
     for _, out, n_posts, n_comments in shards:
         for k, vals in out.items():
             if k in _POST_ID_KEYS:
                 master[k].extend(v + post_off for v in vals)
             elif k in _COMMENT_ID_KEYS:
-                master[k].extend(v + comm_off for v in vals)
+                master[k].extend(v + post_total + comm_off for v in vals)
             else:
                 master[k].extend(vals)
         post_off += n_posts
@@ -370,47 +372,31 @@ def _merge_shards(shards: list[tuple[int, dict[str, list], int, int]]
 
 
 def _build_message_tables(m: dict[str, list]) -> dict[str, pa.Table]:
-    def ts(vals):
-        return pa.array(vals, type=pa.timestamp("ms"))
-
     def ids(vals):
         return pa.array(vals, type=pa.int64())
 
-    posts = pa.table({
-        "ID": ids(m["post_ids"]),
-        "imageFile": m["post_img"],
-        "creationDate": ts(m["post_cd"]),
-        "locationIP": m["post_ip"], "browserUsed": m["post_br"],
-        "language": m["post_lang"],
-        "content": m["post_ct"], "length": ids(m["post_len"]),
-    })
-    comments = pa.table({
-        "ID": ids(m["c_ids"]),
-        "creationDate": ts(m["c_cd"]),
-        "locationIP": m["c_ip"], "browserUsed": m["c_br"], "content": m["c_ct"],
-        "length": ids(m["c_len"]),
-    })
+    message_ids = m["post_ids"] + m["c_ids"]
     return {
-        "Post": posts,
-        "Comment": comments,
-        "postHasCreator": pa.table({"FROM": ids(m["post_creator_f"]),
-                                     "TO": ids(m["post_creator_t"])}),
-        "commentHasCreator": pa.table({"FROM": ids(m["c_creator_f"]),
-                                        "TO": ids(m["c_creator_t"])}),
-        "containerOf": pa.table({"FROM": ids(m["cont_f"]), "TO": ids(m["cont_t"])}),
-        "postIsLocatedIn": pa.table({"FROM": ids(m["post_loc_f"]),
-                                      "TO": ids(m["post_loc_t"])}),
-        "commentIsLocatedIn": pa.table({"FROM": ids(m["c_loc_f"]),
-                                         "TO": ids(m["c_loc_t"])}),
-        "postHasTag": pa.table({"FROM": ids(m["post_tag_f"]),
-                                 "TO": ids(m["post_tag_t"])}),
-        "commentHasTag": pa.table({"FROM": ids(m["c_tag_f"]), "TO": ids(m["c_tag_t"])}),
-        "replyOfPost": pa.table({"FROM": ids(m["rpost_f"]), "TO": ids(m["rpost_t"])}),
-        "replyOfComment": pa.table({"FROM": ids(m["rcomm_f"]), "TO": ids(m["rcomm_t"])}),
-        "likePost": pa.table({"FROM": ids(m["like_p_f"]), "TO": ids(m["like_p_t"]),
-                              "creationDate": ts(m["like_p_d"])}),
-        "likeComment": pa.table({"FROM": ids(m["like_c_f"]), "TO": ids(m["like_c_t"]),
-                                 "creationDate": ts(m["like_c_d"])}),
+        "Message": pa.table({"ID": ids(message_ids)}),
+        "Message_hasCreator_Person": pa.table(
+            {"FROM": ids(m["post_creator_f"] + m["c_creator_f"]),
+             "TO": ids(m["post_creator_t"] + m["c_creator_t"])}),
+        "Message_hasTag_Tag": pa.table(
+            {"FROM": ids(m["post_tag_f"] + m["c_tag_f"]),
+             "TO": ids(m["post_tag_t"] + m["c_tag_t"])}),
+        "Message_replyOf_Message": pa.table(
+            {"FROM": ids(m["rpost_f"] + m["rcomm_f"]),
+             "TO": ids(m["rpost_t"] + m["rcomm_t"])}),
+        "Comment_replyOf_Post": pa.table(
+            {"FROM": ids(m["rpost_f"]), "TO": ids(m["rpost_t"])}),
+        "Message_isLocatedIn_Country": pa.table(
+            {"FROM": ids(message_ids),
+             "TO": ids(m["post_loc_t"] + m["c_loc_t"])}),
+        "Forum_containerOf_Message": pa.table(
+            {"FROM": ids(m["cont_f"]), "TO": ids(m["cont_t"])}),
+        "Person_likes_Message": pa.table(
+            {"FROM": ids(m["like_p_f"] + m["like_c_f"]),
+             "TO": ids(m["like_p_t"] + m["like_c_t"])}),
     }
 
 
@@ -420,6 +406,7 @@ def generate_messages(cfg: DatagenConfig, d: Dictionaries, n: int,
                       seed: int, workers: int = 1,
                       off: "off.Official | None" = None, n_tags: int = 0,
                       person_place: list[int] | None = None,
+                      person_country: list[int] | None = None,
                       friends: dict[int, list[int]] | None = None) -> dict[str, pa.Table]:
     global _MSG_CTX
     mem_f = forum_members["FROM"].to_pylist()
@@ -447,15 +434,18 @@ def generate_messages(cfg: DatagenConfig, d: Dictionaries, n: int,
         "min_text_size": cfg.min_text_size, "max_text_size": cfg.max_text_size,
         "max_num_comments": cfg.max_num_comments, "prob_english": cfg.prob_english,
         "off": off, "n_tags": n_tags, "person_place": person_place,
-        "posts_factor": (off.scalars["n_posts"] * n / off.scalars["n_persons"])
-        / (max(1, n_forums) * (1 - off.scalars["forums_no_post_frac"])
-           * off.hists["posts_per_forum"].mean) if off is not None else 1.0,
+        "person_country": person_country,
+        "posts_factor": ((off.scalars["n_posts"] * n / off.scalars["n_persons"])
+                         / (max(1, n_forums) * (1 - off.scalars["forums_no_post_frac"])
+                            * off.hists["posts_per_forum"].mean)) if off is not None else 1.0,
         "comment_exp": 1.095,
         "comment_rate": comment_rate,
         "friends": friends,
         "hot_sigma": 1.49,  # mean-1 lognormal, E[h^2]=9.2
-        "post_like_factor": 9.444 / off.hists["likes_per_msg"].mean,
-        "comment_like_factor": 21.566 / off.hists["likes_per_msg"].mean,
+        "post_like_factor": (9.444 / off.hists["likes_per_msg"].mean
+                             if off is not None else 1.0),
+        "comment_like_factor": (21.566 / off.hists["likes_per_msg"].mean
+                                if off is not None else 1.0),
     }
     # Contiguous forum ranges; per-forum seeding => worker-invariant output.
     tasks = []
